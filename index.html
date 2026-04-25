@@ -1,0 +1,2385 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DCE Tool — Dead Code Elimination</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      /* Premium dark slate palette — replaces the washed teal/blue vibe-code theme */
+      --bg: #0a0c10;
+      --bg2: #0f1117;
+      --surface: #141720;
+      --surface2: #1c2030;
+      --surface3: #232840;
+      --border: rgba(160, 174, 232, 0.08);
+      --border-hi: rgba(160, 174, 232, 0.18);
+      --border-glow: rgba(99, 132, 255, 0.35);
+
+      /* Accent: electric indigo + coral pop */
+      --indigo: #6384ff;
+      --indigo-lo: rgba(99, 132, 255, 0.12);
+      --indigo-glo: rgba(99, 132, 255, 0.25);
+      --coral: #ff6b6b;
+      --coral-lo: rgba(255, 107, 107, 0.1);
+      --amber: #ffb347;
+      --amber-lo: rgba(255, 179, 71, 0.1);
+      --mint: #3ecf8e;
+      --mint-lo: rgba(62, 207, 142, 0.1);
+      --violet: #a78bfa;
+      --violet-lo: rgba(167, 139, 250, 0.1);
+
+      --text: #e2e8ff;
+      --text-2: #8892bb;
+      --text-3: #4a5278;
+      --text-inv: #0a0c10;
+
+      --mono: 'IBM Plex Mono', monospace;
+      --sans: 'Outfit', sans-serif;
+
+      --r: 12px;
+      --r-sm: 7px;
+      --r-lg: 18px;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Background atmosphere ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 15% 10%, rgba(99, 132, 255, 0.06) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 85% 80%, rgba(167, 139, 250, 0.05) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 40% at 50% 50%, rgba(255, 107, 107, 0.02) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Subtle grid overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(160, 174, 232, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(160, 174, 232, 0.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: 60px 1fr;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10, 12, 16, 0.85);
+      backdrop-filter: blur(24px);
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+      height: 60px;
+    }
+
+    @keyframes slideDown {
+      from {
+        transform: translateY(-60px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+
+    .logo-mark {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--indigo) 0%, var(--violet) 100%);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      box-shadow: 0 0 16px rgba(99, 132, 255, 0.4);
+      flex-shrink: 0;
+    }
+
+    .logo-name {
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.3px;
+    }
+
+    .logo-name em {
+      color: var(--indigo);
+      font-style: normal;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 3px;
+    }
+
+    .nav-btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 9px;
+      border: none;
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all 0.18s;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+
+    .nav-btn:hover {
+      color: var(--text);
+      background: var(--surface2);
+    }
+
+    .nav-btn.active {
+      background: var(--indigo);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(99, 132, 255, 0.35);
+    }
+
+    .header-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--indigo);
+      border: 1px solid var(--indigo-glo);
+      background: var(--indigo-lo);
+      padding: 4px 10px;
+      border-radius: 20px;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+
+    /* ── Main layout ── */
+    main {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      height: calc(100vh - 60px);
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      border-right: 1px solid var(--border);
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      background: rgba(15, 17, 23, 0.6);
+      animation: fadeLeft 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+    }
+
+    @keyframes fadeLeft {
+      from {
+        transform: translateX(-20px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--text-3);
+      border-radius: 3px;
+    }
+
+    .sec-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sec-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Upload zone ── */
+    .upload-zone {
+      border: 1.5px dashed var(--border-hi);
+      border-radius: var(--r);
+      padding: 24px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s;
+      background: rgba(99, 132, 255, 0.03);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .upload-zone::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(99, 132, 255, 0.04), transparent 60%);
+      pointer-events: none;
+    }
+
+    .upload-zone:hover {
+      border-color: var(--indigo);
+      background: var(--indigo-lo);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(99, 132, 255, 0.12);
+    }
+
+    .upload-zone.dragging {
+      border-color: var(--indigo);
+      background: rgba(99, 132, 255, 0.08);
+      box-shadow: 0 0 0 3px var(--indigo-glo);
+    }
+
+    .upload-icon {
+      font-size: 28px;
+      display: block;
+      margin-bottom: 10px;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+
+      0%,
+      100% {
+        transform: translateY(0);
+      }
+
+      50% {
+        transform: translateY(-5px);
+      }
+    }
+
+    .upload-zone h3 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .upload-zone p {
+      font-size: 11px;
+      color: var(--text-2);
+      font-family: var(--mono);
+    }
+
+    .or-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-3);
+      font-family: var(--mono);
+      font-size: 10px;
+      margin: 4px 0;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Inputs ── */
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field label {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-2);
+      letter-spacing: 0.5px;
+    }
+
+    .field input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 9px 12px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 11px;
+      outline: none;
+      transition: all 0.18s;
+      width: 100%;
+    }
+
+    .field input::placeholder {
+      color: var(--text-3);
+    }
+
+    .field input:focus {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px var(--indigo-lo);
+    }
+
+    /* ── Chips ── */
+    .chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 5px 11px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all 0.18s;
+      background: transparent;
+      letter-spacing: 0.3px;
+    }
+
+    .chip:hover {
+      border-color: var(--border-hi);
+      color: var(--text);
+    }
+
+    .chip.selected {
+      border-color: var(--indigo);
+      color: var(--indigo);
+      background: var(--indigo-lo);
+    }
+
+    /* ── Toggles ── */
+    .toggle-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .toggle-item:last-child {
+      border-bottom: none;
+    }
+
+    .toggle-label-wrap .tl {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .toggle-label-wrap .ts {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-2);
+      margin-top: 1px;
+    }
+
+    .tog {
+      width: 34px;
+      height: 18px;
+      background: var(--surface2);
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      position: relative;
+      transition: all 0.25s;
+      flex-shrink: 0;
+    }
+
+    .tog::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      background: var(--text-3);
+      border-radius: 50%;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .tog.on {
+      background: rgba(99, 132, 255, 0.2);
+      border-color: var(--indigo);
+    }
+
+    .tog.on::after {
+      left: 18px;
+      background: var(--indigo);
+      box-shadow: 0 0 8px rgba(99, 132, 255, 0.5);
+    }
+
+    /* ── Run button ── */
+    .run-btn {
+      width: 100%;
+      margin-top: auto;
+      padding: 14px;
+      border-radius: var(--r);
+      border: 1px solid var(--border-hi);
+      background: linear-gradient(135deg, var(--indigo) 0%, var(--violet) 100%);
+      color: #fff;
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      transition: all 0.25s;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 4px 20px rgba(99, 132, 255, 0.3);
+    }
+
+    .run-btn::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+      transform: translateX(-100%) rotate(45deg);
+      transition: transform 0.55s;
+    }
+
+    .run-btn:hover::before {
+      transform: translateX(100%) rotate(45deg);
+    }
+
+    .run-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(99, 132, 255, 0.4);
+    }
+
+    .run-btn:active {
+      transform: translateY(0);
+    }
+
+    .run-btn.running {
+      background: linear-gradient(135deg, #4a6aff, #8b5cf6);
+      pointer-events: none;
+      opacity: 0.8;
+    }
+
+    /* ── Content area ── */
+    .content {
+      overflow-y: auto;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(16px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .content::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .content::-webkit-scrollbar-thumb {
+      background: var(--text-3);
+      border-radius: 3px;
+    }
+
+    /* ── Stat cards ── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 18px 16px 16px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.25s;
+      animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+
+    .stat-card:nth-child(1) {
+      animation-delay: 0.3s;
+    }
+
+    .stat-card:nth-child(2) {
+      animation-delay: 0.4s;
+    }
+
+    .stat-card:nth-child(3) {
+      animation-delay: 0.5s;
+    }
+
+    .stat-card:nth-child(4) {
+      animation-delay: 0.6s;
+    }
+
+    @keyframes popIn {
+      from {
+        opacity: 0;
+        transform: scale(0.92) translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+    }
+
+    .stat-card.c-indigo::before {
+      background: linear-gradient(90deg, var(--indigo), transparent);
+    }
+
+    .stat-card.c-coral ::before {
+      background: linear-gradient(90deg, var(--coral), transparent);
+    }
+
+    .stat-card.c-amber ::before {
+      background: linear-gradient(90deg, var(--amber), transparent);
+    }
+
+    .stat-card.c-mint ::before {
+      background: linear-gradient(90deg, var(--mint), transparent);
+    }
+
+    .stat-card:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .stat-ico {
+      font-size: 18px;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .stat-num {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 600;
+      line-height: 1;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+
+    .stat-lbl {
+      font-size: 11px;
+      color: var(--text-2);
+      font-weight: 400;
+    }
+
+    /* ── Progress ── */
+    .progress-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px;
+      display: none;
+    }
+
+    .progress-section.visible {
+      display: block;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .progress-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .progress-pct {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--indigo);
+    }
+
+    .progress-track {
+      background: var(--surface2);
+      border-radius: 4px;
+      height: 5px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--indigo), var(--violet));
+      border-radius: 4px;
+      transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    }
+
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 40px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
+      animation: shimmer 1.5s infinite;
+    }
+
+    @keyframes shimmer {
+
+      0%,
+      100% {
+        opacity: 0;
+      }
+
+      50% {
+        opacity: 1;
+      }
+    }
+
+    .log-out {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-2);
+      max-height: 130px;
+      overflow-y: auto;
+      line-height: 1.9;
+    }
+
+    .log-out::-webkit-scrollbar {
+      width: 3px;
+    }
+
+    .log-out::-webkit-scrollbar-thumb {
+      background: var(--text-3);
+    }
+
+    .log-line {
+      animation: logIn 0.25s ease both;
+    }
+
+    @keyframes logIn {
+      from {
+        opacity: 0;
+        transform: translateX(-6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .log-line.success {
+      color: var(--mint);
+    }
+
+    .log-line.warn {
+      color: var(--amber);
+    }
+
+    .log-line.error {
+      color: var(--coral);
+    }
+
+    /* ── Panels row ── */
+    .panels-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    /* ── Panel card ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.015);
+      flex-shrink: 0;
+    }
+
+    .panel-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot.indigo {
+      background: var(--indigo);
+      box-shadow: 0 0 6px var(--indigo);
+    }
+
+    .dot.coral {
+      background: var(--coral);
+      box-shadow: 0 0 6px var(--coral);
+    }
+
+    .dot.mint {
+      background: var(--mint);
+      box-shadow: 0 0 6px var(--mint);
+    }
+
+    .dot.amber {
+      background: var(--amber);
+      box-shadow: 0 0 6px var(--amber);
+    }
+
+    .dot.violet {
+      background: var(--violet);
+      box-shadow: 0 0 6px var(--violet);
+    }
+
+    .panel-acts {
+      display: flex;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.18s;
+    }
+
+    .icon-btn:hover {
+      border-color: var(--border-hi);
+      color: var(--text);
+      background: var(--surface2);
+    }
+
+    .panel-body {
+      padding: 16px;
+      flex: 1;
+      overflow: auto;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      background: var(--surface2);
+      border-radius: var(--r-sm);
+      padding: 2px;
+    }
+
+    .tab {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      color: var(--text-2);
+      border: none;
+      background: none;
+      transition: all 0.18s;
+      letter-spacing: 0.3px;
+    }
+
+    .tab.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    /* ── Dead Code Table ── */
+    .full-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+    }
+
+    .table-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.015);
+      flex-wrap: wrap;
+      min-height: 52px;
+    }
+
+    .table-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 20px;
+      border: 1px solid;
+    }
+
+    .badge.coral {
+      color: var(--coral);
+      border-color: rgba(255, 107, 107, 0.25);
+      background: var(--coral-lo);
+    }
+
+    .badge.mint {
+      color: var(--mint);
+      border-color: rgba(62, 207, 142, 0.25);
+      background: var(--mint-lo);
+    }
+
+    .badge.indigo {
+      color: var(--indigo);
+      border-color: rgba(99, 132, 255, 0.25);
+      background: var(--indigo-lo);
+    }
+
+    .search-box {
+      flex: 1;
+      min-width: 140px;
+      max-width: 220px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      padding: 6px 11px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text);
+      outline: none;
+      transition: all 0.18s;
+    }
+
+    .search-box::placeholder {
+      color: var(--text-3);
+    }
+
+    .search-box:focus {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px var(--indigo-lo);
+    }
+
+    .filter-chips {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+
+    thead tr {
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      padding: 10px 14px;
+      text-align: left;
+      cursor: pointer;
+      transition: color 0.15s;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    th:hover {
+      color: var(--text-2);
+    }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(160, 174, 232, 0.05);
+      transition: background 0.12s;
+      animation: rowIn 0.35s ease both;
+    }
+
+    @keyframes rowIn {
+      from {
+        opacity: 0;
+        transform: translateX(-6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    tbody tr.selected {
+      background: rgba(99, 132, 255, 0.07);
+    }
+
+    td {
+      padding: 9px 14px;
+      color: var(--text-2);
+      font-family: var(--mono);
+      vertical-align: middle;
+    }
+
+    .cb-cell {
+      width: 36px;
+      padding-left: 16px;
+    }
+
+    input[type="checkbox"] {
+      width: 13px;
+      height: 13px;
+      accent-color: var(--indigo);
+      cursor: pointer;
+    }
+
+    .file-path {
+      color: var(--text);
+    }
+
+    .file-path .dir {
+      color: var(--text-3);
+    }
+
+    .sym-cell {
+      color: var(--indigo);
+      font-weight: 500;
+    }
+
+    .type-tag {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid;
+      letter-spacing: 0.3px;
+    }
+
+    .type-tag.fn {
+      color: var(--violet);
+      border-color: rgba(167, 139, 250, 0.3);
+      background: var(--violet-lo);
+    }
+
+    .type-tag.var {
+      color: var(--amber);
+      border-color: rgba(255, 179, 71, 0.3);
+      background: var(--amber-lo);
+    }
+
+    .type-tag.cls {
+      color: var(--indigo);
+      border-color: rgba(99, 132, 255, 0.3);
+      background: var(--indigo-lo);
+    }
+
+    .type-tag.imp {
+      color: var(--mint);
+      border-color: rgba(62, 207, 142, 0.3);
+      background: var(--mint-lo);
+    }
+
+    .line-num {
+      color: var(--text-3);
+      font-size: 10px;
+    }
+
+    .conf-wrap {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .conf-track {
+      width: 54px;
+      height: 3px;
+      background: var(--surface2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .conf-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .conf-fill.hi {
+      background: var(--coral);
+    }
+
+    .conf-fill.med {
+      background: var(--amber);
+    }
+
+    .conf-fill.lo {
+      background: var(--mint);
+    }
+
+    .conf-num {
+      font-size: 9px;
+      color: var(--text-3);
+    }
+
+    .act-btn {
+      color: var(--text-3);
+      cursor: pointer;
+      font-size: 12px;
+      transition: color 0.15s;
+      border: none;
+      background: none;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .act-btn:hover {
+      color: var(--text);
+    }
+
+    /* ── Table footer ── */
+    .table-foot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 16px;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 7px 14px;
+      border-radius: var(--r-sm);
+      border: 1px solid;
+      cursor: pointer;
+      transition: all 0.18s;
+      letter-spacing: 0.2px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .btn-danger {
+      color: var(--coral);
+      border-color: rgba(255, 107, 107, 0.3);
+      background: var(--coral-lo);
+    }
+
+    .btn-danger:hover {
+      background: rgba(255, 107, 107, 0.18);
+      box-shadow: 0 0 16px rgba(255, 107, 107, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .btn-warn {
+      color: var(--amber);
+      border-color: rgba(255, 179, 71, 0.3);
+      background: var(--amber-lo);
+    }
+
+    .btn-warn:hover {
+      background: rgba(255, 179, 71, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      color: var(--text-2);
+      border-color: var(--border);
+      background: transparent;
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--border-hi);
+      color: var(--text);
+      background: var(--surface2);
+    }
+
+    /* ── Code block ── */
+    .code-block {
+      background: var(--bg);
+      border-radius: var(--r-sm);
+      font-family: var(--mono);
+      font-size: 11px;
+      overflow: auto;
+      max-height: 230px;
+      border: 1px solid var(--border);
+    }
+
+    .code-block::-webkit-scrollbar {
+      width: 3px;
+      height: 3px;
+    }
+
+    .code-block::-webkit-scrollbar-thumb {
+      background: var(--text-3);
+    }
+
+    .code-line {
+      display: flex;
+      align-items: flex-start;
+      padding: 2px 0;
+      transition: background 0.12s;
+      position: relative;
+    }
+
+    .code-line:hover {
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .code-line.dead {
+      background: rgba(255, 107, 107, 0.06);
+    }
+
+    .code-line.dead::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--coral);
+    }
+
+    .ln {
+      min-width: 38px;
+      padding: 0 10px;
+      color: var(--text-3);
+      font-size: 10px;
+      user-select: none;
+      text-align: right;
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+
+    .ct {
+      padding: 0 14px 0 6px;
+      color: var(--text-2);
+      white-space: pre;
+      line-height: 1.7;
+    }
+
+    .code-line.dead .ct {
+      color: var(--coral);
+      text-decoration: line-through;
+      opacity: 0.55;
+    }
+
+    .kw {
+      color: #a78bfa;
+    }
+
+    .str {
+      color: var(--mint);
+    }
+
+    .cm {
+      color: var(--text-3);
+      font-style: italic;
+    }
+
+    .num {
+      color: var(--amber);
+    }
+
+    /* ── Graph ── */
+    .graph-wrap {
+      width: 100%;
+      height: 260px;
+      position: relative;
+      background: var(--bg);
+      border-radius: var(--r-sm);
+      overflow: hidden;
+    }
+
+    .graph-wrap canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .graph-legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-2);
+    }
+
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .leg-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+
+    /* ── Export cards ── */
+    .export-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .export-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px 16px;
+      cursor: pointer;
+      transition: all 0.25s;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .export-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, transparent, rgba(99, 132, 255, 0.025));
+      pointer-events: none;
+    }
+
+    .export-card:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .exp-ico {
+      font-size: 22px;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .exp-lbl {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .exp-sub {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-3);
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 280px;
+      text-align: center;
+      gap: 14px;
+      color: var(--text-2);
+    }
+
+    .empty-ico {
+      font-size: 44px;
+      opacity: 0.3;
+      animation: float 4s ease-in-out infinite;
+    }
+
+    .empty-state h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .empty-state p {
+      font-family: var(--mono);
+      font-size: 11px;
+      max-width: 280px;
+      line-height: 1.7;
+      color: var(--text-2);
+    }
+
+    /* ── Rollback ── */
+    .rollback-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .rollback-item:last-child {
+      border-bottom: none;
+    }
+
+    .rb-file {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--indigo);
+    }
+
+    .rb-time {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--surface2);
+      border: 1px solid var(--border-hi);
+      border-radius: var(--r);
+      padding: 12px 18px;
+      font-size: 12px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 9999;
+      transform: translateY(70px);
+      opacity: 0;
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+      max-width: 300px;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    /* ── Tooltip ── */
+    [data-tip] {
+      position: relative;
+    }
+
+    [data-tip]::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 7px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface2);
+      border: 1px solid var(--border-hi);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text);
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.18s;
+      z-index: 100;
+    }
+
+    [data-tip]:hover::after {
+      opacity: 1;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 1100px) {
+      main {
+        grid-template-columns: 270px 1fr;
+      }
+
+      .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .panels-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 780px) {
+      header {
+        padding: 0 16px;
+        gap: 8px;
+      }
+
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .content {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="app">
+
+    <!-- Header -->
+    <header>
+      <a class="logo" href="#">
+        <div class="logo-mark">DCE</div>
+        <span class="logo-name">dce<em>tool</em></span>
+      </a>
+
+      <nav>
+        <button class="nav-btn active" onclick="switchView('analysis')">Analysis</button>
+        <button class="nav-btn" onclick="switchView('graph')">Call Graph</button>
+        <button class="nav-btn" onclick="switchView('rollback')">Rollback</button>
+        <button class="nav-btn" onclick="switchView('export')">Export</button>
+      </nav>
+    </header>
+
+    <!-- Main -->
+    <main>
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+
+        <div class="field">
+          <label style="font-weight:600;font-size:11px;color:var(--text);margin-bottom:8px">Project Source</label>
+          <textarea id="codeInput" placeholder="Paste Python code here..."
+            style="width: 100%; height: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px; color: var(--text); font-family: var(--mono); font-size: 11px; outline: none; resize: vertical; transition: all 0.18s;"></textarea>
+        </div>
+
+        <div>
+          <div class="sec-label">Languages</div>
+          <div class="chips">
+            <button class="chip selected" onclick="toggleChip(this)">Python</button>
+            <button class="chip" onclick="toggleChip(this)">C/C++</button>
+            <button class="chip" onclick="toggleChip(this)">JS</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="sec-label">Options</div>
+          <div class="toggle-item">
+            <div class="toggle-label-wrap">
+              <div class="tl">Safe Remove</div>
+              <div class="ts">Always create .bak before delete</div>
+            </div>
+            <div class="tog on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label-wrap">
+              <div class="tl">Cross-file Analysis</div>
+              <div class="ts">Build whole-program call graph</div>
+            </div>
+            <div class="tog on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label-wrap">
+              <div class="tl">CI/CD Mode</div>
+              <div class="ts">Exit code 1 if dead code found</div>
+            </div>
+            <div class="tog" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label-wrap">
+              <div class="tl">Include Test Files</div>
+              <div class="ts">Analyze test_*.py, *.test.js</div>
+            </div>
+            <div class="tog" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Whitelist / Ignore Patterns</label>
+          <input type="text" placeholder="__init__, setup_*, api_*" id="whitelist">
+        </div>
+
+        <button class="run-btn" id="runBtn" onclick="runAnalysis()">
+          Run Analysis
+        </button>
+
+      </aside>
+
+      <!-- Content -->
+      <section class="content" id="contentArea">
+
+        <!-- ANALYSIS VIEW -->
+        <div id="view-analysis">
+
+          <!-- Stats -->
+          <div class="stats-row">
+            <div class="stat-card c-mint">
+              <span class="stat-ico"></span>
+              <div class="stat-num" id="stat-files">0</div>
+              <div class="stat-lbl">Files Scanned</div>
+            </div>
+            <div class="stat-card c-indigo">
+              <span class="stat-ico"></span>
+              <div class="stat-num" id="stat-symbols">0</div>
+              <div class="stat-lbl">Symbols Found</div>
+            </div>
+            <div class="stat-card c-coral">
+              <span class="stat-ico"></span>
+              <div class="stat-num" id="stat-dead">0</div>
+              <div class="stat-lbl">Dead Symbols</div>
+            </div>
+            <div class="stat-card c-amber">
+              <span class="stat-ico"></span>
+              <div class="stat-num" id="stat-lines">0</div>
+              <div class="stat-lbl">Lines Removable</div>
+            </div>
+          </div>
+
+          <!-- Progress -->
+          <div class="progress-section" id="progressSection">
+            <div class="progress-header">
+              <div class="progress-title">Running Analysis...</div>
+              <div class="progress-pct" id="progressPct">0%</div>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="progressBar" style="width:0%"></div>
+            </div>
+            <div class="log-out" id="logOutput"></div>
+          </div>
+
+          <!-- Dead Code Table -->
+          <div class="full-panel" id="reportPanel" style="display:none">
+            <div class="table-bar">
+              <div class="table-title">
+                Dead Code Report
+                <span class="badge coral" id="deadCount">0 symbols</span>
+              </div>
+              <input class="search-box" type="text" placeholder="Search symbols…" oninput="filterTable(this.value)">
+              <div class="filter-chips">
+                <button class="chip selected" style="font-size:9px;padding:4px 9px"
+                  onclick="filterType('all',this)">All</button>
+                <button class="chip" style="font-size:9px;padding:4px 9px" onclick="filterType('fn',this)">fn</button>
+                <button class="chip" style="font-size:9px;padding:4px 9px" onclick="filterType('var',this)">var</button>
+                <button class="chip" style="font-size:9px;padding:4px 9px"
+                  onclick="filterType('imp',this)">import</button>
+              </div>
+            </div>
+
+            <div style="overflow-x:auto">
+              <table id="deadTable">
+                <thead>
+                  <tr>
+                    <th class="cb-cell" style="padding-left:16px"></th>
+                    <th onclick="sortTable('file')">File ↕</th>
+                    <th onclick="sortTable('sym')">Symbol ↕</th>
+                    <th>Type</th>
+                    <th onclick="sortTable('line')">Line ↕</th>
+                    <th>Confidence</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+              </table>
+            </div>
+
+            <div class="table-foot">
+              <button class="btn btn-danger" onclick="removeSelected()">Remove Selected (<span
+                  id="removeCount">0</span>)</button>
+              <button class="btn btn-ghost" onclick="selectAll()">Select All</button>
+              <button class="btn btn-ghost" onclick="clearSelection()">Clear</button>
+              <span style="font-family:var(--mono);font-size:10px;color:var(--text-3);margin-left:auto" id="selCount">0
+                selected</span>
+            </div>
+          </div>
+
+          <!-- Panels row -->
+          <div class="panels-row" id="panelsRow" style="display:none">
+
+            <!-- Code viewer -->
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <div class="dot coral"></div>
+                  Code Preview
+                </div>
+                <div class="panel-acts">
+                  <div class="tabs">
+                    <button class="tab active" onclick="switchCodeTab(this)">Dead</button>
+                    <button class="tab" onclick="switchCodeTab(this)">All</button>
+                  </div>
+                </div>
+              </div>
+              <div class="panel-body" style="padding:0">
+                <div class="code-block" id="codeViewer"></div>
+              </div>
+            </div>
+
+            <!-- Safe remove -->
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <div class="dot amber"></div>
+                  Safe Remove
+                </div>
+              </div>
+              <div class="panel-body">
+                <p
+                  style="font-size:11px;color:var(--text-2);margin-bottom:14px;font-family:var(--mono);line-height:1.7">
+                  <span id="removeCount2" style="color:var(--indigo)">0</span> symbols selected.
+                  A <code style="color:var(--amber)">.bak</code> backup will be created before any changes.
+                </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn btn-danger" onclick="removeSelected()">Remove Dead Code</button>
+                  <button class="btn btn-warn" onclick="dryRun()">Dry Run</button>
+                  <button class="btn btn-ghost" onclick="showRollback()">Rollback</button>
+                </div>
+                <div id="diffPreview" style="margin-top:14px;display:none">
+                  <div class="sec-label" style="margin-bottom:8px">Diff Preview</div>
+                  <div class="code-block" style="max-height:130px" id="diffBlock"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Empty state -->
+          <div class="empty-state" id="emptyState">
+            <div class="empty-ico"></div>
+            <h3>No analysis yet</h3>
+            <p>Upload a project folder or paste a GitHub URL, then hit Run Analysis to detect dead code.</p>
+          </div>
+
+        </div>
+
+        <!-- GRAPH VIEW -->
+        <div id="view-graph" style="display:none">
+          <div class="panel" style="height:calc(100vh - 108px)">
+            <div class="panel-head">
+              <div class="panel-title-wrap">
+                <div class="dot indigo"></div>
+                Call Graph Visualizer
+                <span class="badge indigo" id="graphNodeCount">0 nodes</span>
+              </div>
+              <div class="panel-acts">
+                <button class="icon-btn" data-tip="Zoom in" onclick="graphZoom(1.2)">+</button>
+                <button class="icon-btn" data-tip="Zoom out" onclick="graphZoom(0.8)">-</button>
+                <button class="icon-btn" data-tip="Reset" onclick="graphReset()">R</button>
+              </div>
+            </div>
+            <div class="graph-wrap">
+              <canvas id="graphCanvas"></canvas>
+            </div>
+            <div class="graph-legend">
+              <div class="leg-item">
+                <div class="leg-dot" style="background:var(--mint)"></div>Live symbol
+              </div>
+              <div class="leg-item">
+                <div class="leg-dot" style="background:var(--coral)"></div>Dead symbol
+              </div>
+              <div class="leg-item">
+                <div class="leg-dot" style="background:var(--indigo)"></div>Entry point
+              </div>
+              <div class="leg-item">
+                <div class="leg-dot" style="background:var(--amber)"></div>External ref
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROLLBACK VIEW -->
+        <div id="view-rollback" style="display:none">
+          <div class="full-panel">
+            <div class="table-bar">
+              <div class="table-title">Backup Files</div>
+              <button class="btn btn-warn" style="margin-left:auto"
+                onclick="showToast('All files restored','warn')">Restore All</button>
+            </div>
+            <div style="padding:0 16px" id="rollbackList">
+              <div class="empty-state" style="min-height:180px">
+                <div class="empty-ico" style="font-size:32px"></div>
+                <h3>No backups yet</h3>
+                <p>Backups appear here after you remove dead code.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- EXPORT VIEW -->
+        <div id="view-export" style="display:none">
+          <div style="margin-bottom:20px">
+            <h2 style="font-size:20px;font-weight:700;margin-bottom:6px">Export Results</h2>
+            <p style="font-size:12px;color:var(--text-2);font-family:var(--mono)">Download analysis reports and cleaned
+              source files.</p>
+          </div>
+
+          <div class="export-grid">
+            <div class="export-card" onclick="downloadCleanCode()">
+              <span class="exp-ico"></span>
+              <div class="exp-lbl">Download Clean Code</div>
+              <div class="exp-sub">dead code removed</div>
+            </div>
+          </div>
+
+          <div style="margin-top:20px">
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title-wrap">
+                  <div class="dot mint"></div>Summary Statistics
+                </div>
+              </div>
+              <div class="panel-body">
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px" id="exportStats">
+                  <div style="font-family:var(--mono);font-size:11px;color:var(--text-2)">Run analysis first to see
+                    statistics.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ── State ──────────────────────────────────────────────
+    let codeHistory = [];
+    let historyLimit = 5;
+    function saveState(code) {
+      if (!code) return;
+
+      // Avoid duplicate saves
+      if (codeHistory.length > 0 && codeHistory[codeHistory.length - 1] === code) {
+        return;
+      }
+
+      codeHistory.push(code);
+
+      // limit history size
+      if (codeHistory.length > historyLimit) {
+        codeHistory.shift();
+      }
+
+      updateRollbackUI();
+    }
+    function updateRollbackUI() {
+      const list = document.getElementById("rollbackList");
+
+      if (!list) return;
+
+      list.innerHTML = codeHistory.map((_, index) => `
+    <div class="rollback-item">
+      <div>
+        <div class="rb-file">Version ${index + 1}</div>
+      </div>
+      <button class="btn btn-warn" onclick="restoreVersion(${index})">
+        Restore
+      </button>
+    </div>
+  `).join("");
+    }
+    function restoreVersion(index) {
+      if (index < 0 || index >= codeHistory.length) return;
+
+      const codeInput = document.getElementById("codeInput");
+      codeInput.value = codeHistory[index];
+
+      showToast("Previous version restored", "success");
+
+      // optional
+      if (state.analysed) runAnalysis();
+    }
+
+
+    const state = {
+      analysed: false,
+      selected: new Set(),
+      filterType: 'all',
+      searchQuery: '',
+    };
+
+    let currentData = [];
+
+    const GRAPH_NODES = [
+      { id: 'main', x: 0.5, y: 0.12, label: 'main()', type: 'entry', dead: false },
+      { id: 'analyze', x: 0.3, y: 0.30, label: 'analyze()', type: 'live', dead: false },
+      { id: 'FileWalker', x: 0.5, y: 0.50, label: 'FileWalker', type: 'live', dead: false },
+      { id: 'build_graph', x: 0.7, y: 0.30, label: 'build_graph()', type: 'live', dead: false },
+      { id: 'report', x: 0.8, y: 0.55, label: 'report()', type: 'live', dead: false },
+      { id: 'debug_print', x: 0.15, y: 0.55, label: 'debug_print()', type: 'dead', dead: true },
+      { id: 'parse_legacy', x: 0.1, y: 0.75, label: 'parse_legacy()', type: 'dead', dead: true },
+      { id: 'xml_exporter', x: 0.85, y: 0.78, label: 'xml_exporter()', type: 'dead', dead: true },
+      { id: 'render_dot', x: 0.65, y: 0.75, label: 'render_dot()', type: 'dead', dead: true },
+      { id: 'walk_legacy', x: 0.35, y: 0.75, label: 'walk_legacy()', type: 'dead', dead: true },
+      { id: 'setup_debug', x: 0.5, y: 0.75, label: 'setup_debug()', type: 'dead', dead: true },
+    ];
+    const GRAPH_EDGES = [
+      ['main', 'analyze'], ['main', 'build_graph'],
+      ['analyze', 'FileWalker'], ['build_graph', 'report'],
+      ['FileWalker', 'analyze'],
+    ];
+
+    // ── Utilities ──────────────────────────────────────────
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      const icons = { success: '', warn: '', error: '', info: '' };
+      t.innerHTML = `<span>${icons[type] || ''}</span><span>${msg}</span>`;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function switchView(name) {
+      ['analysis', 'graph', 'rollback', 'export'].forEach(v => {
+        document.getElementById(`view-${v}`).style.display = v === name ? 'block' : 'none';
+      });
+      document.querySelectorAll('.nav-btn').forEach((b, i) => {
+        b.classList.toggle('active', ['analysis', 'graph', 'rollback', 'export'][i] === name);
+      });
+      if (name === 'graph' && state.analysed) drawGraph();
+    }
+
+    function toggleChip(el) {
+      // If the parent is the language chips container, enforce single selection
+      if (el.parentElement.classList.contains('chips')) {
+        el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+
+        // Update textarea placeholder based on language
+        const lang = el.textContent.toLowerCase();
+        const textarea = document.getElementById('codeInput');
+        if (textarea) {
+          if (lang === 'python') textarea.placeholder = 'Paste Python code here...';
+          else if (lang === 'js') textarea.placeholder = 'Paste JavaScript code here...';
+          else if (lang === 'c/c++') textarea.placeholder = 'Paste C/C++ code here...';
+        }
+      } else {
+        el.classList.toggle('selected');
+      }
+    }
+
+    function getSelectedLanguage() {
+      const selected = document.querySelector('.chips .chip.selected');
+      if (!selected) return 'python';
+      const lang = selected.textContent.toLowerCase();
+      if (lang === 'c/c++') return 'cpp';
+      return lang;
+    }
+
+    // ── File handling ──────────────────────────────────────
+
+
+    // ── Analysis ───────────────────────────────────────────
+    async function runAnalysis() {
+      const btn = document.getElementById('runBtn');
+      const codeInput = document.getElementById('codeInput');
+      const code = codeInput ? codeInput.value.trim() : "";
+
+      if (!code) {
+        showToast("Paste some code first!", "warn");
+        return;
+      }
+
+      saveState(code);  // ✅ CORRECT PLACE
+
+      btn.textContent = 'Analysing...';
+      btn.classList.add('running');
+      document.getElementById('emptyState').style.display = 'none';
+
+      try {
+        const language = getSelectedLanguage();
+        const response = await fetch("/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ code: code, language: language })
+        });
+
+        const data = await response.json();
+
+        if (data.error || data.message) {
+          showToast("" + (data.error || data.message), "error");
+          btn.textContent = 'Run Analysis';
+          btn.classList.remove('running');
+          return;
+        }
+
+        state.analysed = true;
+
+        // 👇 Update UI with REAL data
+        document.getElementById("stat-dead").textContent = data.dead_code.length;
+        document.getElementById("deadCount").textContent = data.dead_code.length + " symbols";
+
+        // Show results
+        document.getElementById('reportPanel').style.display = 'block';
+        document.getElementById('panelsRow').style.display = 'grid';
+
+        // Convert backend response to table format
+        const ext = language === "python" ? "py" : language === "js" ? "js" : "cpp";
+        currentData = data.dead_code.map((item, i) => ({
+          id: i,
+          file: `user_code.${ext}`,
+          sym: item,
+          type: item.includes("class") ? "cls" : "fn",
+          line: "-",
+          conf: 95
+        }));
+
+        renderTable(currentData);
+        renderRealCode(code, data.dead_code);
+
+        showToast("Analysis complete", "success");
+
+      } catch (err) {
+        console.error(err);
+        showToast("Server error", "error");
+      }
+
+      btn.textContent = 'Run Analysis';
+      btn.classList.remove('running');
+    }
+    function rollbackLast() {
+      if (codeHistory.length < 2) {
+        showToast("No previous version", "warn");
+        return;
+      }
+
+      // remove current version
+      codeHistory.pop();
+
+      const previous = codeHistory[codeHistory.length - 1];
+
+      document.getElementById("codeInput").value = previous;
+
+      showToast("Rollback successful", "success");
+
+      runAnalysis();
+    }
+    function removeDeadCodeFromEditor(code, deadFunctions) {
+      const lines = code.split("\n");
+      const result = [];
+      let skip = false;
+      let braceCount = 0;
+
+      for (let line of lines) {
+        const isStart = deadFunctions.some(func =>
+          line.includes(`def ${func}`) ||
+          line.includes(`class ${func}`) ||
+          line.includes(`function ${func}`)
+        );
+
+        if (isStart) {
+          skip = true;
+          braceCount = 0;
+          continue;
+        }
+
+        if (skip) {
+          // Track JS/C++ braces
+          braceCount += (line.match(/{/g) || []).length;
+          braceCount -= (line.match(/}/g) || []).length;
+
+          // Stop skipping when block ends
+          if (braceCount <= 0 && line.includes("}")) {
+            skip = false;
+          }
+
+          // Python block end
+          if (!line.startsWith(" ") && line.trim() !== "") {
+            skip = false;
+          }
+
+          continue;
+        }
+
+        result.push(line);
+      }
+
+      return result.join("\n");
+    }
+    function renderRealCode(code, deadFunctions) {
+      const viewer = document.getElementById('codeViewer');
+      const lines = code.split("\n");
+
+      const lang = getSelectedLanguage();
+      viewer.innerHTML = lines.map((line, index) => {
+        let isDead = false;
+
+        deadFunctions.forEach(func => {
+          if (lang === 'python') {
+            if (line.includes(`def ${func}`) || line.includes(`class ${func}`)) isDead = true;
+          } else if (lang === 'js') {
+            if (line.includes(`function ${func}`) || line.includes(`${func} =`) || line.includes(`${func}:`)) isDead = true;
+          } else if (lang === 'cpp') {
+            if (line.includes(`${func}(`) && !line.includes(';')) isDead = true; // Simple heuristic for definition
+          }
+        });
+
+        return `
+      <div class="code-line ${isDead ? 'dead' : ''}">
+        <span class="ln">${index + 1}</span>
+        <span class="ct">${line.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>
+      </div>
+    `;
+      }).join('');
+    }
+
+    // ── Table ──────────────────────────────────────────────
+    function renderTable(data) {
+      const tbody = document.getElementById('tableBody');
+      const filtered = data.filter(r => {
+        const matchType = state.filterType === 'all' || r.type === state.filterType;
+        const q = state.searchQuery.toLowerCase();
+        const matchQ = !q || r.sym.toLowerCase().includes(q) || r.file.toLowerCase().includes(q);
+        return matchType && matchQ;
+      });
+      document.getElementById('deadCount').textContent = `${filtered.length} symbols`;
+      tbody.innerHTML = filtered.map((r, i) => {
+        const cc = r.conf >= 95 ? 'hi' : r.conf >= 85 ? 'med' : 'lo';
+        const parts = r.file.split('/');
+        const fname = parts.pop();
+        const fdir = parts.join('/') + (parts.length ? '/' : '');
+        return `
+    <tr style="animation-delay:${i * 0.035}s" class="${state.selected.has(r.id) ? 'selected' : ''}" onclick="toggleRow(${r.id},this)">
+      <td class="cb-cell"><input type="checkbox" ${state.selected.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleRow(${r.id},this.closest('tr'))"></td>
+      <td class="file-path"><span class="dir">${fdir}</span>${fname}</td>
+      <td class="sym-cell">${r.sym}</td>
+      <td><span class="type-tag ${r.type}">${r.type === 'fn' ? 'function' : r.type === 'var' ? 'variable' : r.type === 'cls' ? 'class' : 'import'}</span></td>
+      <td class="line-num">L${r.line}</td>
+      <td>
+        <div class="conf-wrap">
+          <div class="conf-track"><div class="conf-fill ${cc}" style="width:${r.conf}%"></div></div>
+          <span class="conf-num">${r.conf}%</span>
+        </div>
+      </td>
+      <td><button class="act-btn" onclick="event.stopPropagation();previewRow(${r.id})" data-tip="Preview">👁</button></td>
+    </tr>`;
+      }).join('');
+      updateSelCount();
+    }
+
+    function toggleRow(id, row) {
+      if (state.selected.has(id)) {
+        state.selected.delete(id);
+        row.classList.remove('selected');
+        row.querySelector('input[type=checkbox]').checked = false;
+      } else {
+        state.selected.add(id);
+        row.classList.add('selected');
+        row.querySelector('input[type=checkbox]').checked = true;
+      }
+      updateSelCount();
+    }
+
+    function updateSelCount() {
+      const n = state.selected.size;
+      document.getElementById('selCount').textContent = `${n} selected`;
+      document.getElementById('removeCount').textContent = n;
+      if (document.getElementById('removeCount2'))
+        document.getElementById('removeCount2').textContent = n;
+    }
+
+    function filterTable(q) { state.searchQuery = q; renderTable(currentData); }
+    function filterType(type, btn) {
+      state.filterType = type;
+      document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('selected'));
+      btn.classList.add('selected');
+      renderTable(currentData);
+    }
+    function selectAll() { currentData.forEach(r => state.selected.add(r.id)); renderTable(currentData); }
+    function clearSelection() { state.selected.clear(); renderTable(currentData); }
+
+    let sortDir = {};
+    function sortTable(key) {
+      sortDir[key] = !sortDir[key];
+      currentData.sort((a, b) => {
+        const av = a[key], bv = b[key];
+        return sortDir[key] ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+      });
+      renderTable(currentData);
+    }
+
+    function previewRow(id) { showToast(`Previewing symbol #${id}`, 'info'); }
+
+
+
+    function switchCodeTab(btn) {
+      document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+    }
+
+    // ── Remove / Rollback ──────────────────────────────────
+    function removeSelected() {
+      if (!state.selected.size) {
+        showToast('Select symbols first', 'warn');
+        return;
+      }
+
+      const codeInput = document.getElementById("codeInput");
+
+      // ✅ SAVE BEFORE MODIFYING
+      saveState(codeInput.value);
+
+
+      const toRemove = currentData
+        .filter(r => state.selected.has(r.id))
+        .map(r => r.sym);
+
+      const newCode = removeDeadCodeFromEditor(codeInput.value, toRemove);
+
+      codeInput.value = newCode;
+
+      state.selected.clear();
+      runAnalysis();
+    }
+
+    function dryRun() {
+      const preview = document.getElementById('diffPreview');
+      const block = document.getElementById('diffBlock');
+      preview.style.display = 'block';
+      block.innerHTML = [
+        `<div class="code-line"><span class="ln">8</span><span class="ct" style="color:var(--coral)">- def debug_print(msg):</span></div>`,
+        `<div class="code-line"><span class="ln">9</span><span class="ct" style="color:var(--coral)">-     """Old debug utility"""</span></div>`,
+        `<div class="code-line"><span class="ln">10</span><span class="ct" style="color:var(--coral)">-     print(f"[DEBUG] {msg}")</span></div>`,
+        `<div class="code-line"><span class="ln">5</span><span class="ct" style="color:var(--coral)">- UNUSED_CONSTANT = "legacy_v1"</span></div>`,
+        `<div class="code-line"><span class="ln">1</span><span class="ct" style="color:var(--coral)">- import os</span></div>`,
+      ].join('');
+      showToast('👁 Dry run preview generated', 'info');
+    }
+
+    function showRollback() { switchView('rollback'); }
+
+
+
+    // ── Export ─────────────────────────────────────────────
+    function downloadCleanCode() {
+      const code = document.getElementById("codeInput").value;
+      const blob = new Blob([code], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "cleaned_code.txt";
+      a.click();
+    }
+
+    // ── Graph ──────────────────────────────────────────────
+    let canvas, ctx, gZoom = 1, gOff = { x: 0, y: 0 }, isDragging = false, lastPos = { x: 0, y: 0 };
+
+    function drawGraph() {
+      canvas = document.getElementById('graphCanvas');
+      ctx = canvas.getContext('2d');
+      const wrap = canvas.parentElement;
+      canvas.width = wrap.clientWidth;
+      canvas.height = wrap.clientHeight;
+      renderGraph();
+    }
+
+    function renderGraph() {
+      if (!ctx) return;
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.translate(W / 2 + gOff.x, H / 2 + gOff.y);
+      ctx.scale(gZoom, gZoom);
+      ctx.translate(-W / 2, -H / 2);
+
+      GRAPH_EDGES.forEach(([a, b]) => {
+        const na = GRAPH_NODES.find(n => n.id === a);
+        const nb = GRAPH_NODES.find(n => n.id === b);
+        const x1 = na.x * W, y1 = na.y * H, x2 = nb.x * W, y2 = nb.y * H;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+        ctx.strokeStyle = 'rgba(99,132,255,0.2)'; ctx.lineWidth = 1.5; ctx.stroke();
+        const angle = Math.atan2(y2 - y1, x2 - x1), r = 18;
+        ctx.beginPath();
+        ctx.moveTo(x2 - r * Math.cos(angle), y2 - r * Math.sin(angle));
+        ctx.lineTo(x2 - r * Math.cos(angle) - 6 * Math.cos(angle - 0.4), y2 - r * Math.sin(angle) - 6 * Math.sin(angle - 0.4));
+        ctx.lineTo(x2 - r * Math.cos(angle) - 6 * Math.cos(angle + 0.4), y2 - r * Math.sin(angle) - 6 * Math.sin(angle + 0.4));
+        ctx.closePath(); ctx.fillStyle = 'rgba(99,132,255,0.4)'; ctx.fill();
+      });
+
+      GRAPH_NODES.forEach(n => {
+        const x = n.x * W, y = n.y * H;
+        const color = n.type === 'entry' ? '#6384ff' : n.dead ? '#ff6b6b' : '#3ecf8e';
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, 26);
+        grad.addColorStop(0, color + '28'); grad.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(x, y, 26, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 17, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f1117'; ctx.fill();
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.font = '10px IBM Plex Mono, monospace';
+        ctx.fillStyle = n.dead ? 'rgba(255,107,107,0.8)' : 'rgba(226,232,255,0.8)';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.label, x, y + 30);
+      });
+      ctx.restore();
+    }
+
+    function graphZoom(f) { gZoom = Math.max(0.3, Math.min(3, gZoom * f)); renderGraph(); }
+    function graphReset() { gZoom = 1; gOff = { x: 0, y: 0 }; renderGraph(); }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const c = document.getElementById('graphCanvas');
+      if (c) {
+        c.addEventListener('mousedown', e => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; });
+        c.addEventListener('mousemove', e => {
+          if (!isDragging) return;
+          gOff.x += e.clientX - lastPos.x; gOff.y += e.clientY - lastPos.y;
+          lastPos = { x: e.clientX, y: e.clientY }; renderGraph();
+        });
+        c.addEventListener('mouseup', () => isDragging = false);
+        c.addEventListener('wheel', e => { e.preventDefault(); graphZoom(e.deltaY < 0 ? 1.1 : 0.9); }, { passive: false });
+      }
+    });
+  </script>
+</body>
+
+</html>
